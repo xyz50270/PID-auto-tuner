@@ -1,0 +1,27 @@
+[project]
+name = "pid-auto-tuner"
+version = "0.1.0"
+description = "Industrial PID tuning helper with data diagnosis and simulation"
+authors = [
+    {name = "bingyu", email = "admin@bingyu.tech"},
+]
+dependencies = [
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
+    "streamlit>=1.24.0",
+    "plotly>=5.15.0",
+    "watchdog>=3.0.0", # Useful for development
+]
+requires-python = ">=3.10"
+
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q"
+testpaths = [
+    "tests",
+]

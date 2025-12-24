@@ -1,0 +1,8 @@
+.gemini/
+.pytest_cache/
+openspec/
+pid_auto_tuner.egg-info/
+venv/
+AGENTS.md
+__pycache__/
+*.pyc
