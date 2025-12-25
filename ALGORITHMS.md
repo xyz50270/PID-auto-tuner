@@ -81,7 +81,36 @@ $$ Aggr = \frac{\Delta OP / OP_{range}}{\Delta Error / SP_{range}} $$
 
 ---
 
-## 6. 安全性论证：分步迭代的收敛性
+## 6. 阀门机械与静态特性深度分析
+
+本章节阐述系统如何通过过程数据逆向推导执行器（调节阀）的物理健康状态。
+
+### 6.1 增益线性度评价 (Gain Linearity Analysis)
+**理论依据**：理想调节阀应具备确定的流量特性。若受控对象的静态增益 $K$ 随开度 $OP$ 大幅波动，代表控制回路存在严重的非线性，会导致一套 PID 参数在全量程内表现不一。
+
+**算法实现**：
+1.  **区间分桶 (OP-Binning)**：将 $0\% \sim 100\%$ 的开度划分为 10 个等分区间。
+2.  **局部增益估计 ($K_{local}$)**：在每个区间内执行局部线性回归或差分计算：
+    $$ K_{local, i} = \frac{\Delta PV}{\Delta OP} \bigg|_{OP \in [low_i, high_i]} $$
+3.  **线性度评分公式**：利用局部增益的**变异系数 (CV)** 进行量化：
+    $$ Score_{lin} = 100 \times \left( 1 - \frac{\sigma(K_{local})}{\mu(K_{local})} \right) $$
+
+### 6.2 冲刷腐蚀检测 (Erosion & Flushing Detection)
+**物理逻辑**：当阀芯或阀座发生冲刷腐蚀时，阀门在微小开度下由于几何形状改变导致流量突增。
+**判定准则**：
+$$ \text{IF } \bar{K}_{OP < 15\%} > 1.5 \times \bar{K}_{global} \text{ THEN High Erosion Risk} $$
+**论证**：在流体力学中，受损阀座在低升程下的有效流通面积增加率远超设计值，表现为局部增益异常偏高且伴随高频随机波动。
+
+### 6.3 粘滞区间精准定位 (Stiction Zone Mapping)
+**理论依据**：机械粘滞（Stiction）往往并非全量程均匀分布，通常集中在填料压盖受力不均或阀杆磨损严重的特定位置。
+**启发式判定算法**：
+1.  **特征识别**：实时监测满足 $\left( \text{std}(OP)_{window} > \epsilon_{OP} \right) \land \left( \text{std}(PV)_{window} < \text{NoiseFloor} \right)$ 的样本点。
+2.  **位置关联**：记录上述点对应的 $OP$ 值，并进行直方图统计。
+3.  **风险区间定义**：若某一 $10\%$ 区间内的粘滞事件频次占总体的 $10\%$ 以上，则标记该区间为“高粘滞风险区”。
+
+---
+
+## 7. 安全性论证：分步迭代的收敛性
 程序强制执行 $20\%$ 的参数调整限制，其数学本质是**阻尼牛顿法 (Damped Newton Method)**。
 在模型不确定性为 $\Delta$ 的情况下，小步长更新确保了：
 $$ \| K_{p, new} - K_{p, optimal} \| < \epsilon \cdot \| K_{p, old} - K_{p, optimal} \| $$

@@ -1,34 +1,31 @@
 import pandas as pd
 from typing import Dict, IO, Union
+import os
 
 class IngestionError(Exception):
     """Custom exception for data ingestion errors."""
     pass
 
-def load_and_validate_csv(
+def load_and_validate_data(
     file_buffer: Union[str, IO],
+    filename: str = "",
     column_map: Dict[str, str] = None
 ) -> pd.DataFrame:
     """
-    Load CSV data and validate required columns.
-    
-    Args:
-        file_buffer: File path or buffer-like object.
-        column_map: Dictionary mapping user columns to internal names 
-                    ('Time', 'SP', 'PV', 'OP').
-                    
-    Returns:
-        pd.DataFrame: Cleaned dataframe with standard columns.
-        
-    Raises:
-        IngestionError: If validation fails.
+    Load CSV or Excel data and validate required columns.
     """
     try:
-        df = pd.read_csv(file_buffer)
-    except pd.errors.EmptyDataError:
-        raise IngestionError("提供的文件为空。")
+        # Determine file type
+        ext = os.path.splitext(filename)[1].lower() if filename else ""
+        
+        if ext in ['.xlsx', '.xls']:
+            df = pd.read_excel(file_buffer)
+        else:
+            # Default to CSV
+            df = pd.read_csv(file_buffer)
+            
     except Exception as e:
-        raise IngestionError(f"解析 CSV 失败: {str(e)}")
+        raise IngestionError(f"文件读取失败: {str(e)}")
 
     if df.empty:
         raise IngestionError("提供的文件为空。")
@@ -37,7 +34,7 @@ def load_and_validate_csv(
         # Check if mapped columns exist
         missing_source_cols = [col for col in column_map.keys() if col not in df.columns]
         if missing_source_cols:
-             raise IngestionError(f"CSV 中缺少指定的列: {missing_source_cols}")
+             raise IngestionError(f"文件中缺少指定的列: {missing_source_cols}")
         
         df = df.rename(columns=column_map)
     
@@ -47,11 +44,11 @@ def load_and_validate_csv(
     if missing_required:
         raise IngestionError(f"映射后缺少必要的列: {missing_required}。需要: {required_cols}")
 
-    # Ensure Time is datetime
+    # Ensure Time is datetime with high precision
     try:
         df['Time'] = pd.to_datetime(df['Time'])
     except Exception:
-         raise IngestionError("无法将 'Time' 列转换为日期时间格式。")
+         raise IngestionError("无法将 'Time' 列转换为日期时间格式。请确保时间列包含完整的日期和时间（包含秒）。")
          
     # Ensure numeric types
     for col in ['SP', 'PV', 'OP']:

@@ -12,9 +12,10 @@ from io import BytesIO
 # 将项目根目录添加到 sys.path，以便能够导入 src 模块
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.ingestion import load_and_validate_csv, IngestionError
-from src.diagnosis import analyze_loop_health, HealthStatus
+from src.ingestion import load_and_validate_data, IngestionError
+from src.diagnosis import analyze_loop_health, HealthStatus, analyze_advanced_valve_health, ValveHealthReport
 from src.modeling import fit_fopdt, FOPDTModel
+# ... (rest of imports)
 from src.tuning import calculate_imc_pid, suggest_parameters, PIDParams, TuningSuggestion
 from src.simulation import simulate_closed_loop
 from src.evaluation import calculate_metrics, PerformanceMetrics
@@ -55,6 +56,11 @@ st.markdown(r"""
         margin-bottom: 0px;
     }
 
+    /* 增加侧边栏宽度 */
+    section[data-testid="stSidebar"] {
+        width: 400px !important;
+    }
+
     /* 水印样式 */
     .watermark {
         position: fixed;
@@ -73,20 +79,36 @@ st.markdown(r"""
 """, unsafe_allow_html=True)
 
 # --- 辅助函数：绘制过程数据趋势图 ---
-def plot_time_series(df, title="实时过程数据趋势图"):
+def plot_time_series(df, title="实时过程数据趋势图", diag_res=None):
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     
-    fig.add_trace(go.Scatter(x=df['Time'], y=df['SP'], name='设定值 (SP/SetPoint)', line=dict(color='green', dash='dash')), secondary_y=False)
-    fig.add_trace(go.Scatter(x=df['Time'], y=df['PV'], name='过程变量 (PV/ProcessVar)', line=dict(color='blue')), secondary_y=False)
-    fig.add_trace(go.Scatter(x=df['Time'], y=df['OP'], name='控制器输出 (OP/Output)', line=dict(color='red'), opacity=0.4), secondary_y=True)
+    fig.add_trace(go.Scatter(x=df['Time'], y=df['SP'], name='设定值 (SP)', line=dict(color='green', dash='dash')), secondary_y=False)
+    fig.add_trace(go.Scatter(x=df['Time'], y=df['PV'], name='过程变量 (PV)', line=dict(color='blue')), secondary_y=False)
+    fig.add_trace(go.Scatter(x=df['Time'], y=df['OP'], name='输出 (OP)', line=dict(color='red'), opacity=0.3), secondary_y=True)
     
+    # 增加异常标注
+    if diag_res:
+        # 标注饱和区 (Saturation)
+        if diag_res.saturation_mask is not None and diag_res.saturation_mask.any():
+            sat_df = df[diag_res.saturation_mask]
+            fig.add_trace(go.Scatter(x=sat_df['Time'], y=sat_df['OP'], mode='markers', 
+                                     marker=dict(color='orange', size=8, symbol='x'),
+                                     name='异常：执行器饱和'), secondary_y=True)
+        
+        # 标注粘滞点 (Stiction)
+        if diag_res.stiction_mask is not None and diag_res.stiction_mask.any():
+            stic_df = df[diag_res.stiction_mask]
+            fig.add_trace(go.Scatter(x=stic_df['Time'], y=stic_df['PV'], mode='markers', 
+                                     marker=dict(color='purple', size=6, symbol='circle-open'),
+                                     name='特征：疑似粘滞/死区'), secondary_y=False)
+
     fig.update_layout(
         title=title, 
         hovermode="x unified", 
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
-    fig.update_yaxes(title_text="PV / SP (工程单位)", secondary_y=False)
-    fig.update_yaxes(title_text="输出值 OP (%)", secondary_y=True)
+    fig.update_yaxes(title_text="PV / SP", secondary_y=False)
+    fig.update_yaxes(title_text="OP (%)", secondary_y=True)
     return fig
 
 # --- 辅助函数：渲染整定建议详情卡片 ---
@@ -322,24 +344,28 @@ def main():
     ti_in = c2.number_input("积分 Ti", key=i_key)
     td_in = c3.number_input("微分 Td", key=d_key)
     
-    upl_file = st.sidebar.file_uploader("上传 CSV 响应数据", type=["csv"], key=f"upl_v8_{n_ds}")
-    st.sidebar.caption("数据需包含列: Time(时间), SP(设定值), PV(过程变量), OP(输出)。")
+    upl_file = st.sidebar.file_uploader("上传响应数据 (CSV 或 Excel)", type=["csv", "xlsx", "xls"], key=f"upl_v8_{n_ds}")
+    st.sidebar.caption("数据需包含列: Time(时间), SP(设定值), PV(过程变量), OP(输出)。Excel 格式通常比 CSV 具有更高的时间精度。")
     
     if upl_file:
         try:
-            # ... (previous code for CSV mapping)
-            df_preview = pd.read_csv(upl_file)
+            # 预览数据以自动映射列名
+            if upl_file.name.lower().endswith(('.xlsx', '.xls')):
+                df_preview = pd.read_excel(upl_file)
+            else:
+                df_preview = pd.read_csv(upl_file)
+                
             cols = df_preview.columns.tolist()
             upl_file.seek(0)
             cmap = {}
             for c in cols:
-                cl = c.lower()
+                cl = str(c).lower()
                 if 'time' in cl or 'date' in cl: cmap[c] = 'Time'
                 elif 'sp' in cl or 'set' in cl: cmap[c] = 'SP'
                 elif 'pv' in cl or 'process' in cl: cmap[c] = 'PV'
                 elif 'op' in cl or 'out' in cl: cmap[c] = 'OP'
             
-            df = load_and_validate_csv(upl_file, cmap)
+            df = load_and_validate_data(upl_file, filename=upl_file.name, column_map=cmap)
             if st.sidebar.button("确认添加此轮数据并分析", width='stretch', key=f"btn_add_v8_{n_ds}"):
                 final_pid = PIDParams.from_pb(p_in, ti_in, td_in) if is_pb else PIDParams(p_in, ti_in, td_in)
                 new_e = {
@@ -419,6 +445,24 @@ def main():
                     cs2.metric("控制攻击性", f"{cur_ds['ctrl_stats'].aggressiveness:.2f}", help="控制器对误差的反应速度。过高可能放大噪音。" )
                     cs3.metric("采样质量评分", f"{cur_ds['ctrl_stats'].data_quality_score:.0f}/100")
 
+            with st.expander("🛠️ 阀门机械特性深度分析 (线性/冲刷/粘滞)", expanded=False):
+                v_health = analyze_advanced_valve_health(cur_ds['df'])
+                vh1, vh2 = st.columns(2)
+                with vh1:
+                    st.metric("线性度评分", f"{v_health.linearity_score:.1f}/100")
+                    if v_health.gain_by_range:
+                        g_df = pd.DataFrame([{"开度区间": k, "局部增益": v} for k, v in v_health.gain_by_range.items()])
+                        fig_g = go.Figure()
+                        fig_g.add_trace(go.Bar(x=g_df['开度区间'], y=g_df['局部增益'], name='局部增益'))
+                        fig_g.update_layout(title="不同开度下的静态增益 (线性度验证)", height=300)
+                        st.plotly_chart(fig_g, use_container_width=True)
+                with vh2:
+                    st.markdown("**专家诊断建议**")
+                    for sug in v_health.suggestions:
+                        st.info(f"💡 {sug}")
+                    if v_health.stiction_zones:
+                        st.error("检测到高粘滞风险区间")
+                
             st.divider()
             st.subheader("🚀 过程物理模型辨识")
             ct1, ct2 = st.columns([1, 1])
@@ -486,7 +530,11 @@ def main():
         with t3:
             s_name_raw = st.selectbox("选择要查看的原始响应阶段", [d['name'] for d in st.session_state['datasets']], key="sel_t3_v8")
             s_data_raw = next(d for d in st.session_state['datasets'] if d['name'] == s_name_raw)
-            st.plotly_chart(plot_time_series(s_data_raw['df'], title=f"{s_name_raw} - 原始数据响应详情"), width='stretch')
+            
+            # 执行即时诊断以获取标注掩码
+            d_res_for_plot = analyze_loop_health(s_data_raw['df'])
+            
+            st.plotly_chart(plot_time_series(s_data_raw['df'], title=f"{s_name_raw} - 异常特征点标注图", diag_res=d_res_for_plot), width='stretch')
             st.markdown("### 📊 该阶段性能核心指标 (KPI)")
             met_vals = s_data_raw['metrics']
             mk1, mk2, mk3, mk4 = st.columns(4)
