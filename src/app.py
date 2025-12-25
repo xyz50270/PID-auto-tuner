@@ -78,23 +78,30 @@ def plot_time_series(df, title="实时过程数据趋势图"):
 def render_tuning_suggestion(suggestion: TuningSuggestion):
     st.markdown("### 🔍 详细整定建议面板")
     
+    is_pb = st.session_state.get('pid_mode') == "PB"
+    mode_str = st.session_state.get('pid_mode', 'Kp')
+    p_label = "比例度 PB (%)" if is_pb else "比例增益 Kp"
+    
+    def get_p_val(pid):
+        return pid.PB if is_pb else pid.Kp
+
     col1, col2, col3 = st.columns(3)
     
     with col1:
         st.info("###### 1. 该阶段当前参数 (Current)")
-        st.metric("比例增益 Kp", f"{suggestion.current_pid.Kp:.4f}", help="该段数据采集时实际生效的比例增益。")
+        st.metric(p_label, f"{get_p_val(suggestion.current_pid):.4f}", help="该段数据采集时实际生效的比例参数。")
         st.metric("积分时间 Ti (s)", f"{suggestion.current_pid.Ti:.2f}", help="该段数据采集时实际生效的积分时间（单位：秒）。")
         st.metric("微分时间 Td (s)", f"{suggestion.current_pid.Td:.2f}")
 
     with col2:
         st.success("###### 2. 基于此阶段建议调整 (Next Step)")
-        st.metric("建议 Kp", f"{suggestion.next_step_pid.Kp:.4f}", help=suggestion.delta['Kp_desc'])
-        st.metric("建议 Ti (s)", f"{suggestion.next_step_pid.Ti:.2f}", help=suggestion.delta['Ti_desc'])
-        st.metric("建议 Td (s)", f"{suggestion.next_step_pid.Td:.2f}", help=suggestion.delta['Td_desc'])
+        st.metric(f"建议 {p_label.split()[-1]}", f"{get_p_val(suggestion.next_step_pid):.4f}", help=suggestion.get_delta_desc('Kp', mode=mode_str))
+        st.metric("建议 Ti (s)", f"{suggestion.next_step_pid.Ti:.2f}", help=suggestion.get_delta_desc('Ti', mode=mode_str))
+        st.metric("建议 Td (s)", f"{suggestion.next_step_pid.Td:.2f}", help=suggestion.get_delta_desc('Td', mode=mode_str))
         
     with col3:
         st.warning("###### 3. 最终理论目标值 (Target)")
-        st.metric("理论目标 Kp", f"{suggestion.target_pid.Kp:.4f}", help="根据辨识出的物理模型计算出的理论最优比例增益值。")
+        st.metric(f"理论目标 {p_label.split()[-1]}", f"{get_p_val(suggestion.target_pid):.4f}", help="根据辨识出的物理模型计算出的理论最优比例参数值。")
         st.metric("理论目标 Ti (s)", f"{suggestion.target_pid.Ti:.2f}", help="理论最优积分时间。")
         st.metric("理论目标 Td (s)", f"{suggestion.target_pid.Td:.2f}")
 
@@ -113,7 +120,10 @@ def render_help_page():
     ## 1. PID 控制基础原理
     PID 控制器通过对误差进行比例 (P)、积分 (I) 和微分 (D) 运算来生成输出 (OP)：
     
-    *   **P (比例增益 Kp)**: 决定对当前误差的调节力度。Kp 越大，响应越快，但过大会引起系统震荡。
+    *   **P (比例参数)**: 
+        *   **比例增益 Kp**: 决定对当前误差的调节力度。Kp 越大，响应越快，但过大会引起系统震荡。
+        *   **比例度 PB (%)**: 输出变化 100% 时对应的输入偏差占量程的百分比。**PB 越小，控制作用越强**。
+        *   **关系**: $PB = 100 / Kp$。
     *   **I (积分时间 Ti)**: 用于消除稳态误差。Ti 越小，积分项作用越强，消除残余偏差的速度越快。
     *   **D (微分时间 Td)**: 预测未来趋势，起到“提前刹车”的作用，有助于抑制超调并改善动态稳定性。
         
@@ -156,7 +166,29 @@ def main():
         st.session_state['confirm_reset'] = False
     if 'pending_delete_idx' not in st.session_state:
         st.session_state['pending_delete_idx'] = None
+    if 'pid_mode_toggle' not in st.session_state:
+        st.session_state['pid_mode_toggle'] = False
+    if 'last_pid_mode' not in st.session_state:
+        st.session_state['last_pid_mode'] = "Kp"
         
+    # --- 侧边栏：全局配置 ---
+    st.sidebar.header("⚙️ 全局配置")
+    st.sidebar.toggle(
+        "使用比例度 (PB) 模式", 
+        key='pid_mode_toggle',
+        help="开启后，所有比例参数将以比例度 (%) 形式显示和录入。关系：PB = 100 / Kp"
+    )
+    st.session_state['pid_mode'] = "PB" if st.session_state['pid_mode_toggle'] else "Kp"
+    
+    # 模式切换时的实时换算逻辑 (针对当前录入框)
+    if st.session_state['pid_mode'] != st.session_state['last_pid_mode']:
+        curr_p_key = f"p_v8_{len(st.session_state['datasets'])}"
+        if curr_p_key in st.session_state:
+            old_val = st.session_state[curr_p_key]
+            # 换算公式: 新值 = 100 / 旧值 (Kp 和 PB 互为倒数关系 * 100)
+            st.session_state[curr_p_key] = 100.0 / old_val if abs(old_val) > 1e-9 else 0.0
+        st.session_state['last_pid_mode'] = st.session_state['pid_mode']
+    
     # --- 侧边栏：会话管理与持久化 ---
     with st.sidebar.expander("💾 会话与进度管理", expanded=False):
         if st.session_state['datasets']:
@@ -246,22 +278,41 @@ def main():
     st.sidebar.markdown(f"### 📥 录入阶段数据 ({step_lbl})")
     upl_name = st.sidebar.text_input("给此阶段起个名字", value=f"Adjustment_{n_ds}" if n_ds > 0 else "Baseline")
     
+    is_pb = st.session_state['pid_mode'] == "PB"
+    p_label = "比例度 PB (%)" if is_pb else "比例 Kp"
+    
     st.sidebar.markdown("#### ⚙️ 该阶段运行时的 PID 参数")
     c1, c2, c3 = st.sidebar.columns(3)
-    pk, pi, pdv = 1.0, 10.0, 0.0
-    if n_ds > 0:
-        lp = st.session_state['datasets'][-1]['pid']
-        pk, pi, pdv = lp.Kp, lp.Ti, lp.Td
+    
+    # 定义 Key
+    p_key = f"p_v8_{n_ds}"
+    i_key = f"i_v8_{n_ds}"
+    d_key = f"d_v8_{n_ds}"
+    
+    # 如果是首次进入该阶段，初始化 Session State 中的值
+    if p_key not in st.session_state:
+        pk, pi, pdv = 1.0, 10.0, 0.0
+        if n_ds > 0:
+            lp = st.session_state['datasets'][-1]['pid']
+            pk, pi, pdv = (lp.PB if is_pb else lp.Kp), lp.Ti, lp.Td
+        elif is_pb:
+            pk = 100.0
         
-    kp_in = c1.number_input("比例 Kp", value=float(pk), key=f"k_v8_{n_ds}")
-    ti_in = c2.number_input("积分 Ti", value=float(pi), key=f"i_v8_{n_ds}")
-    td_in = c3.number_input("微分 Td", value=float(pdv), key=f"d_v8_{n_ds}")
+        st.session_state[p_key] = float(pk)
+        st.session_state[i_key] = float(pi)
+        st.session_state[d_key] = float(pdv)
+        
+    # 使用 key 绑定，不再传入 value 参数以避免冲突
+    p_in = c1.number_input(p_label, key=p_key)
+    ti_in = c2.number_input("积分 Ti", key=i_key)
+    td_in = c3.number_input("微分 Td", key=d_key)
     
     upl_file = st.sidebar.file_uploader("上传 CSV 响应数据", type=["csv"], key=f"upl_v8_{n_ds}")
     st.sidebar.caption("数据需包含列: Time(时间), SP(设定值), PV(过程变量), OP(输出)。")
     
     if upl_file:
         try:
+            # ... (previous code for CSV mapping)
             df_preview = pd.read_csv(upl_file)
             cols = df_preview.columns.tolist()
             upl_file.seek(0)
@@ -275,8 +326,9 @@ def main():
             
             df = load_and_validate_csv(upl_file, cmap)
             if st.sidebar.button("确认添加此轮数据并分析", width='stretch', key=f"btn_add_v8_{n_ds}"):
+                final_pid = PIDParams.from_pb(p_in, ti_in, td_in) if is_pb else PIDParams(p_in, ti_in, td_in)
                 new_e = {
-                    'name': upl_name, 'df': df, 'pid': PIDParams(kp_in, ti_in, td_in),
+                    'name': upl_name, 'df': df, 'pid': final_pid,
                     'metrics': calculate_metrics(df), 'ctrl_stats': analyze_controller_characteristics(df), 'model': None
                 }
                 st.session_state['datasets'].append(new_e)
@@ -299,8 +351,9 @@ def main():
             st.subheader("整定效果迭代演变看板")
             h_list = []
             for ds in st.session_state['datasets']:
+                p_val = ds['pid'].PB if is_pb else ds['pid'].Kp
                 row = {
-                    "阶段名称": ds['name'], "比例 Kp": ds['pid'].Kp, "积分 Ti (s)": ds['pid'].Ti, "微分 Td (s)": ds['pid'].Td,
+                    "阶段名称": ds['name'], p_label: p_val, "积分 Ti (s)": ds['pid'].Ti, "微分 Td (s)": ds['pid'].Td,
                     "IAE 误差": ds['metrics'].iae, "超调量 (%)": ds['metrics'].overshoot
                 }
                 if 'ctrl_stats' in ds:
@@ -318,12 +371,12 @@ def main():
                 st.plotly_chart(fi, width='stretch')
             with cg2:
                 fp = go.Figure()
-                fp.add_trace(go.Scatter(x=df_h['阶段名称'], y=df_h['比例 Kp'], mode='lines+markers', name='比例 Kp'))
+                fp.add_trace(go.Scatter(x=df_h['阶段名称'], y=df_h[p_label], mode='lines+markers', name=p_label))
                 fp.add_trace(go.Scatter(x=df_h['阶段名称'], y=df_h['积分 Ti (s)'], mode='lines+markers', name='积分 Ti', yaxis='y2'))
                 fp.add_trace(go.Scatter(x=df_h['阶段名称'], y=df_h['微分 Td (s)'], mode='lines+markers', name='微分 Td', yaxis='y2'))
                 fp.update_layout(
                     title="PID 参数演变路径图", 
-                    yaxis=dict(title="比例增益 Kp"), 
+                    yaxis=dict(title=p_label), 
                     yaxis2=dict(title="时间参数 Ti/Td (s)", overlaying='y', side='right')
                 )
                 st.plotly_chart(fp, width='stretch')

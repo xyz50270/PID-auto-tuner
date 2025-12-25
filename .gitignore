@@ -3,6 +3,11 @@
 openspec/
 pid_auto_tuner.egg-info/
 venv/
+runtime/
 AGENTS.md
+*.pkl
+.vscode/
+.idea/
+*.log
 __pycache__/
 *.pyc

@@ -10,47 +10,35 @@
 *   **💡 安全整定建议**：基于 SIMC 等先进整定算法，并引入“安全步长”限制（默认单次调整不超过 20%），确保工业现场安全。
 *   **🔮 闭环仿真对比**：在应用参数前，直观对比当前参数与建议参数的理论响应曲线。
 *   **📊 多维度性能评价**：量化分析 IAE（绝对误差积分）、TV（输出总变差）、超调量及调节时间等关键 KPI。
+*   **🔄 参数模式切换**：支持“比例增益 (Kp)”与“比例度 (PB)”一键切换，适配不同行业工程师的使用习惯。
 *   **💾 会话进度管理**：支持整定过程的导出与导入，方便跨时间、跨人员协作。
 
 ## 技术栈
 
-*   **语言**: Python 3.10+
+*   **语言**: Python 3.10+ (支持 Windows 免安装内嵌环境)
 *   **Web 框架**: [Streamlit](https://streamlit.io/) (交互式 UI)
 *   **数据处理**: Pandas, NumPy
 *   **科学计算**: SciPy (非线性优化与信号处理)
 *   **可视化**: Plotly (动态交互图表)
 
-## 快速开始
+## 快速开始 (Windows)
 
-### 1. 环境准备
+本项目已针对 Windows 平台进行了优化，无需手动安装 Python 环境。
 
-确保您的系统中已安装 Python 3.10 或更高版本。建议使用虚拟环境：
-
-```bash
-# 创建虚拟环境
-python -m venv venv
-
-# 激活虚拟环境 (Windows)
-.\venv\Scripts\activate
-
-# 激活虚拟环境 (Linux/macOS)
-source venv/bin/activate
+### 1. 初始化环境 (首次运行)
+右键点击 `setup_runtime.ps1` 并选择“使用 PowerShell 运行”，或者在终端执行：
+```powershell
+.\setup_runtime.ps1
 ```
+该脚本会自动下载内嵌式 Python 运行时并安装所有必要的依赖包到 `runtime/` 目录。
 
-### 2. 安装依赖
+### 2. 启动程序
+双击根目录下的 **`run.bat`** 即可启动系统。
 
-```bash
-pip install -r requirements.txt
-```
-*(注：如果尚未创建 requirements.txt，可以使用 `pip install streamlit pandas numpy scipy plotly` 直接安装核心包)*
+---
 
-### 3. 运行程序
-
-```bash
-streamlit run src/app.py
-```
-
-程序启动后，将在您的浏览器中打开 Web 界面（通常为 `http://localhost:8501`）。
+## 快速开始 (传统方式/其他平台)
+如果你希望使用系统自带的 Python 环境：
 
 ## 数据要求
 
