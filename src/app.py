@@ -54,7 +54,22 @@ st.markdown(r"""
         height: 2rem;
         margin-bottom: 0px;
     }
+
+    /* 水印样式 */
+    .watermark {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        z-index: 999999;
+        pointer-events: none;
+        opacity: 0.15;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300'><text x='50%' y='50%' font-size='24' fill='gray' font-family='Arial' text-anchor='middle' transform='rotate(-45 150 150)'>开发测试版</text></svg>");
+        background-repeat: repeat;
+    }
 </style>
+<div class="watermark"></div>
 """, unsafe_allow_html=True)
 
 # --- 辅助函数：绘制过程数据趋势图 ---
